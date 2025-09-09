@@ -1,0 +1,431 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  COLABORADOR
+  CLIENTE
+}
+
+enum ClientType {
+  PF
+  PJ
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  CANCELED
+  DONE
+}
+
+enum ServiceOrderStatus {
+  OPEN
+  IN_PROGRESS
+  PAUSED
+  COMPLETED
+  CANCELED
+}
+
+enum BudgetStatus {
+  DRAFT
+  SENT
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum NotificationChannel {
+  EMAIL
+  WHATSAPP
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum NotificationEventType {
+  APPOINTMENT_CREATED
+  APPOINTMENT_UPDATED
+  APPOINTMENT_STATUS_CHANGED
+  APPOINTMENT_REMINDER_24H
+  APPOINTMENT_REMINDER_2H
+}
+
+enum ContactType {
+  EMAIL
+  WHATSAPP
+}
+
+// --------------------
+// Usuários / Clientes
+// --------------------
+model User {
+  id           String @id @default(uuid())
+  name         String
+  email        String @unique
+  passwordHash String
+  role         Role
+
+  // Portal do cliente (quando role = CLIENTE)
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  timeEntries            TimeEntry[]
+  Appointment            Appointment[]
+  ServiceOrder           ServiceOrder[]           @relation("CreatedServiceOrders")
+  Notification           Notification[]
+  NotificationPreference NotificationPreference[]
+  ContactMethod          ContactMethod[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role])
+  @@index([clientId])
+}
+
+model Client {
+  id       String     @id @default(uuid())
+  type     ClientType
+  name     String
+  document String     @unique
+  email    String?
+  phone    String?
+
+  // Relacionamentos
+  users        User[]
+  addresses    Address[] // CASCADE
+  appointments Appointment[] // RESTRICT (negócio)
+  orders       ServiceOrder[] // RESTRICT (negócio)
+  budgets      Budget[] // RESTRICT (negócio)
+
+  Notification           Notification[] // SET_NULL na ponta do filho
+  NotificationPreference NotificationPreference[] // SET_NULL na ponta do filho
+  ContactMethod          ContactMethod[] // CASCADE (dados de contato)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Address {
+  id       String @id @default(uuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  label      String?
+  street     String
+  number     String?
+  district   String?
+  city       String
+  state      String
+  zip        String
+  complement String?
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  Appointment Appointment[]
+
+  @@index([clientId])
+}
+
+// --------------------
+// Catálogos
+// --------------------
+model ServiceType {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+
+  appointments Appointment[]
+}
+
+model Vehicle {
+  id    String  @id @default(uuid())
+  plate String  @unique
+  model String
+  color String?
+
+  appointments Appointment[]
+}
+
+// --------------------
+// Agendamentos / OS / Orçamentos
+// --------------------
+model Appointment {
+  id       String @id @default(uuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  collaboratorId String?
+  collaborator   User?   @relation(fields: [collaboratorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  serviceTypeId String?
+  serviceType   ServiceType? @relation(fields: [serviceTypeId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  vehicleId String?
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  // opcional: vínculo com endereço do cliente
+  addressId  String?
+  addressRef Address? @relation(fields: [addressId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  description String?
+  startAt     DateTime
+  endAt       DateTime?
+  status      AppointmentStatus @default(SCHEDULED)
+
+  // Snapshot do endereço no momento do agendamento
+  addressStreet     String
+  addressNumber     String?
+  addressDistrict   String?
+  addressCity       String
+  addressState      String
+  addressZip        String
+  addressComplement String?
+
+  attachments   Attachment[]
+  serviceOrders ServiceOrder[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([collaboratorId])
+  @@index([startAt])
+  @@index([status, startAt])
+}
+
+model ServiceOrder {
+  id   String @id @default(uuid())
+  code String @unique // OS-2025-00001
+
+  appointmentId String?
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  description String
+  status      ServiceOrderStatus @default(OPEN)
+
+  attachments Attachment[]
+  budgets     Budget[]
+
+  createdById String
+  createdBy   User   @relation("CreatedServiceOrders", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([status, createdAt])
+}
+
+model Budget {
+  id             String       @id @default(uuid())
+  serviceOrderId String
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  amount    Decimal      @db.Decimal(12, 2)
+  currency  String       @default("BRL")
+  status    BudgetStatus @default(DRAFT)
+  expiresAt DateTime?
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  attachments Attachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([serviceOrderId])
+  @@index([clientId])
+  @@index([status, createdAt])
+}
+
+// --------------------
+// Anexos (polimórfico simplificado)
+// --------------------
+model Attachment {
+  id          String  @id @default(uuid())
+  url         String
+  filename    String
+  contentType String?
+  sizeBytes   Int?
+
+  // Exatamente um dos três deve ser informado (validar na service)
+  appointmentId String?
+  orderId       String?
+  budgetId      String?
+
+  appointment Appointment?  @relation(fields: [appointmentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  order       ServiceOrder? @relation(fields: [orderId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  budget      Budget?       @relation(fields: [budgetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([appointmentId])
+  @@index([orderId])
+  @@index([budgetId])
+}
+
+// --------------------
+// Ponto (Timesheet)
+// --------------------
+model TimeEntry {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  startedAt DateTime
+  endedAt   DateTime?
+
+  lat   Float?
+  lng   Float?
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, startedAt])
+}
+
+// --------------------
+// Contatos / Notificações
+// --------------------
+model ContactMethod {
+  id              String      @id @default(uuid())
+  clientId        String?
+  userId          String?
+  type            ContactType
+  value           String
+  isPrimary       Boolean     @default(false)
+  isActive        Boolean     @default(true)
+  verifiedAt      DateTime?
+  whatsappOptInAt DateTime?
+
+  client Client? @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  preferences         NotificationPreference[]
+  NotificationConsent NotificationConsent[]
+  Notification        Notification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([type, value])
+  @@index([clientId])
+  @@index([userId])
+}
+
+model NotificationPreference {
+  id String @id @default(uuid())
+
+  userId          String?
+  clientId        String?
+  contactMethodId String?
+
+  eventType NotificationEventType
+  channel   NotificationChannel
+  enabled   Boolean               @default(true)
+
+  user          User?          @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  client        Client?        @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  contactMethod ContactMethod? @relation(fields: [contactMethodId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Observação: garanta em nível de serviço que pelo menos userId ou clientId esteja preenchido
+  @@unique([userId, eventType, channel], map: "uniq_user_event_channel")
+  @@unique([clientId, eventType, channel], map: "uniq_client_event_channel")
+  @@index([userId])
+  @@index([clientId])
+}
+
+model NotificationTemplate {
+  id        String                @id @default(uuid())
+  eventType NotificationEventType
+  channel   NotificationChannel
+  name      String
+  locale    String                @default("pt-BR")
+
+  // Email
+  subject  String?
+  bodyHtml String?
+  bodyText String?
+
+  // WhatsApp (WABA)
+  whatsappTemplateName String?
+  variables            Json?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  Notification Notification[]
+
+  @@unique([channel, name, locale])
+}
+
+model Notification {
+  id        String                @id @default(uuid())
+  eventType NotificationEventType
+  channel   NotificationChannel
+
+  templateId String?
+  template   NotificationTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  clientId        String?
+  userId          String?
+  contactMethodId String?
+  recipient       String?
+
+  payload    Json
+  entityType String // ex.: "APPOINTMENT"
+  entityId   String // ex.: appointmentId
+
+  status            NotificationStatus @default(QUEUED)
+  attempt           Int                @default(0)
+  providerMessageId String?
+  lastError         String?
+  sendAt            DateTime?
+
+  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  client        Client?        @relation(fields: [clientId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  contactMethod ContactMethod? @relation(fields: [contactMethodId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, sendAt])
+  @@index([entityType, entityId])
+}
+
+model NotificationConsent {
+  id              String              @id @default(uuid())
+  contactMethodId String
+  channel         NotificationChannel
+  optedIn         Boolean             @default(true)
+  source          String?
+  ip              String?
+  userAgent       String?
+  occurredAt      DateTime            @default(now())
+
+  contactMethod ContactMethod @relation(fields: [contactMethodId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([contactMethodId, occurredAt])
+}
