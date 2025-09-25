@@ -9,6 +9,8 @@ import { AuthModule } from './auth/auth.module';
 import { ClientsModule } from './clients/clients.module';
 import { AppointmentsModule } from './appointments/appointments.module';
 import { AttachmentsModule } from './attachments/attachments.module';
+import { BudgetsModule } from './budgets/budgets.module';
+import { ServiceOrdersModule } from './service-orders/service-orders.module';
 
 @Module({
   imports: [
@@ -18,6 +20,8 @@ import { AttachmentsModule } from './attachments/attachments.module';
     ClientsModule,
     AppointmentsModule,
     AttachmentsModule,
+    BudgetsModule,
+    ServiceOrdersModule,
   ],
   controllers: [AppController],
   providers: [
