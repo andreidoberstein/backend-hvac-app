@@ -41,6 +41,12 @@ enum BudgetStatus {
   EXPIRED
 }
 
+enum AttachmentTarget {
+  APPOINTMENT
+  ORDER
+  BUDGET
+}
+
 enum NotificationChannel {
   EMAIL
   WHATSAPP
@@ -262,13 +268,14 @@ model Budget {
 // Anexos (polimórfico simplificado)
 // --------------------
 model Attachment {
-  id          String  @id @default(uuid())
+  id          String           @id @default(uuid())
+  targetType  AttachmentTarget
+  targetId    String
   url         String
   filename    String
   contentType String?
   sizeBytes   Int?
 
-  // Exatamente um dos três deve ser informado (validar na service)
   appointmentId String?
   orderId       String?
   budgetId      String?
